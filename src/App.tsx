@@ -22,6 +22,7 @@ function loadImageElement(url: string): Promise<HTMLImageElement> {
 
 export default function App() {
   const [hydrated, setHydrated] = useState(false);
+  const [initWarning, setInitWarning] = useState<string | null>(null);
   const [config, setConfig] = useState<CustomGameConfig>(() => createDefaultGameConfig());
   const [media, setMedia] = useState<LoadedMediaAssets>({
     imageUrls: {},
@@ -66,78 +67,88 @@ export default function App() {
     let cancelled = false;
 
     const hydrate = async () => {
-      const [loadedConfig, blobs] = await Promise.all([
-        loadGameConfig(),
-        loadAllAssetBlobs(),
-      ]);
+      try {
+        const [loadedConfig, blobs] = await Promise.all([
+          loadGameConfig(),
+          loadAllAssetBlobs(),
+        ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      const nextImageUrls: Partial<Record<ImageSlotKey, string>> = {};
-      const nextImageElements: Partial<Record<ImageSlotKey, HTMLImageElement>> = {};
-      const nextAudioUrls: Partial<Record<AudioSlotKey, string>> = {};
+        const nextImageUrls: Partial<Record<ImageSlotKey, string>> = {};
+        const nextImageElements: Partial<Record<ImageSlotKey, HTMLImageElement>> = {};
+        const nextAudioUrls: Partial<Record<AudioSlotKey, string>> = {};
 
-      const imageSlots: ImageSlotKey[] = [
-        'character',
-        'upperPillar',
-        'lowerPillar',
-        'background',
-      ];
-      for (const slot of imageSlots) {
-        const blob = blobs[`image:${slot}`];
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          nextImageUrls[slot] = url;
-          try {
-            const el = await loadImageElement(url);
-            if (!cancelled) {
-              nextImageElements[slot] = el;
+        const imageSlots: ImageSlotKey[] = [
+          'character',
+          'upperPillar',
+          'lowerPillar',
+          'background',
+        ];
+        for (const slot of imageSlots) {
+          const blob = blobs[`image:${slot}`];
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            nextImageUrls[slot] = url;
+            try {
+              const el = await loadImageElement(url);
+              if (!cancelled) {
+                nextImageElements[slot] = el;
+              }
+            } catch {
+              // Keep fallback if blob fails to decode
             }
-          } catch {
-            // Keep fallback if blob fails to decode
-          }
-        } else if (loadedConfig.images[slot].hasAsset) {
-          loadedConfig.images[slot].hasAsset = false;
-        }
-      }
-
-      const audioSlots: AudioSlotKey[] = [
-        'flying',
-        'collision',
-        'victory',
-        'gameOver',
-        'startScreen',
-      ];
-      for (const slot of audioSlots) {
-        const blob = blobs[`audio:${slot}`];
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          nextAudioUrls[slot] = url;
-          audioController.setTrackSource(slot, url);
-        } else {
-          audioController.setTrackSource(slot, undefined);
-          if (loadedConfig.audio[slot].hasAsset) {
-            loadedConfig.audio[slot].hasAsset = false;
+          } else if (loadedConfig.images[slot].hasAsset) {
+            loadedConfig.images[slot].hasAsset = false;
           }
         }
+
+        const audioSlots: AudioSlotKey[] = [
+          'flying',
+          'collision',
+          'victory',
+          'gameOver',
+          'startScreen',
+        ];
+        for (const slot of audioSlots) {
+          const blob = blobs[`audio:${slot}`];
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            nextAudioUrls[slot] = url;
+            audioController.setTrackSource(slot, url);
+          } else {
+            audioController.setTrackSource(slot, undefined);
+            if (loadedConfig.audio[slot].hasAsset) {
+              loadedConfig.audio[slot].hasAsset = false;
+            }
+          }
+        }
+
+        if (cancelled) return;
+
+        audioController.updateConfigs(
+          loadedConfig.audio,
+          loadedConfig.settings.masterVolume,
+          loadedConfig.settings.muted
+        );
+
+        mediaUrlsRef.current = {
+          imageUrls: nextImageUrls,
+          imageElements: nextImageElements,
+          audioUrls: nextAudioUrls,
+        };
+        setMedia(mediaUrlsRef.current);
+        setConfig(loadedConfig);
+      } catch (err) {
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setInitWarning(`Could not load locally saved assets (${msg}). Running with default assets.`);
+        }
+      } finally {
+        if (!cancelled) {
+          setHydrated(true);
+        }
       }
-
-      if (cancelled) return;
-
-      audioController.updateConfigs(
-        loadedConfig.audio,
-        loadedConfig.settings.masterVolume,
-        loadedConfig.settings.muted
-      );
-
-      mediaUrlsRef.current = {
-        imageUrls: nextImageUrls,
-        imageElements: nextImageElements,
-        audioUrls: nextAudioUrls,
-      };
-      setMedia(mediaUrlsRef.current);
-      setConfig(loadedConfig);
-      setHydrated(true);
     };
 
     void hydrate();
@@ -228,6 +239,20 @@ export default function App() {
       </header>
 
       <main>
+        {initWarning && (
+          <div className="mx-auto mt-4 max-w-[1040px] px-4 sm:px-6">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
+              <span>{initWarning}</span>
+              <button
+                type="button"
+                onClick={() => setInitWarning(null)}
+                className="rounded px-2 py-1 font-semibold text-amber-300 hover:bg-amber-500/20"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         <GameArena
           config={config}
           media={media}

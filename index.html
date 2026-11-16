@@ -12,9 +12,63 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      html, body {
+        background-color: #0b1120;
+        color: #f1f5f9;
+        margin: 0;
+        min-height: 100%;
+      }
+      .boot-fallback {
+        max-width: 540px;
+        margin: 48px auto;
+        padding: 24px;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        background: #11192b;
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.5;
+      }
+    </style>
   </head>
   <body class="bg-[#0B1120] text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-200">
     <div id="root"></div>
+    <noscript>
+      <div class="boot-fallback">
+        <h2 style="margin-top:0;color:#fbbf24;">JavaScript Required</h2>
+        <p>Please enable JavaScript in your browser to play Skyline Studio Arcade.</p>
+      </div>
+    </noscript>
+    <script>
+      (function () {
+        var bootErrors = [];
+        window.addEventListener('error', function (e) {
+          if (e && (e.message || (e.target && e.target.src))) {
+            bootErrors.push(e.message || ('Failed to load resource: ' + e.target.src));
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          if (e && e.reason) {
+            bootErrors.push(e.reason.message || String(e.reason));
+          }
+        });
+        window.setTimeout(function () {
+          if (window.__APP_MOUNTED__) return;
+          var root = document.getElementById('root');
+          if (!root || root.children.length > 0) return;
+          var detail = bootErrors.length
+            ? bootErrors.join(' | ')
+            : 'The application script did not initialize. If deploying on GitHub Pages, make sure Pages is set to deploy from GitHub Actions (building dist/) rather than raw source files.';
+          root.innerHTML =
+            '<div class="boot-fallback">' +
+            '<h2 style="margin-top:0;color:#f87171;">Application Failed to Start</h2>' +
+            '<p style="color:#cbd5e1;font-size:14px;">' + detail.replace(/</g, '&lt;') + '</p>' +
+            '<p style="color:#94a3b8;font-size:12px;margin-bottom:0;">Current URL: ' +
+            window.location.href.replace(/</g, '&lt;') +
+            '</p></div>';
+        }, 4000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
