@@ -8,11 +8,11 @@ import {defineConfig} from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default defineConfig(() => {
+export default defineConfig(({command, isPreview}) => {
   return {
-    // Relative base ensures assets, JS, and CSS resolve on GitHub Pages
-    // subpaths (https://<user>.github.io/<repo>/) as well as root domains.
-    base: './',
+    // Use the exact GitHub Pages repository subpath for production builds and preview,
+    // while keeping '/' for local development server.
+    base: command === 'build' || isPreview ? '/flappy-baby/' : '/',
     plugins: [
       react(),
       tailwindcss(),

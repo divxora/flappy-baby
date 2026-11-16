@@ -6,10 +6,7 @@
     <title>Skyline Studio Arcade</title>
     <script>
       (function () {
-        var path = window.location.pathname;
-        var base = path.replace(/[^/]*$/, '');
-        if (!base.endsWith('/')) base += '/';
-        window.location.replace(base + window.location.search + window.location.hash);
+        window.location.replace('/flappy-baby/' + window.location.search + window.location.hash);
       })();
     </script>
   </head>
