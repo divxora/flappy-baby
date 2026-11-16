@@ -12,6 +12,7 @@ import {
   ImageSlotKey,
   LoadedMediaAssets,
 } from './types/game';
+import { getViteBaseUrl, resolveAssetUrl } from './utils/assetPath';
 
 interface StaticAssetManifest {
   images?: Partial<Record<ImageSlotKey, string | null>>;
@@ -21,8 +22,8 @@ interface StaticAssetManifest {
 
 async function fetchStaticManifest(): Promise<StaticAssetManifest | null> {
   try {
-    const base = import.meta.env.BASE_URL || './';
-    const res = await fetch(`${base}assets/manifest.json`, { cache: 'no-cache' });
+    const manifestUrl = `${getViteBaseUrl()}assets/manifest.json`;
+    const res = await fetch(manifestUrl, { cache: 'no-cache' });
     if (!res.ok) return null;
     return (await res.json()) as StaticAssetManifest;
   } catch {
@@ -34,7 +35,7 @@ function loadImageElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to decode image'));
+    img.onerror = () => reject(new Error(`Failed to decode image: ${url}`));
     img.src = url;
   });
 }
@@ -99,7 +100,6 @@ export default function App() {
 
         if (cancelled) return;
 
-        const base = import.meta.env.BASE_URL || './';
         const staticCfg = manifest?.config;
 
         // Apply static config defaults for transforms/settings if provided
@@ -162,7 +162,7 @@ export default function App() {
               // Keep fallback if blob fails to decode
             }
           } else if (staticFile) {
-            const staticUrl = `${base}assets/${staticFile.replace(/^\/+/, '')}`;
+            const staticUrl = resolveAssetUrl(staticFile, 'assets/');
             try {
               const el = await loadImageElement(staticUrl);
               if (!cancelled) {
@@ -195,7 +195,7 @@ export default function App() {
             nextAudioUrls[slot] = url;
             audioController.setTrackSource(slot, url);
           } else if (staticFile) {
-            const staticUrl = `${base}assets/${staticFile.replace(/^\/+/, '')}`;
+            const staticUrl = resolveAssetUrl(staticFile, 'assets/');
             audioController.setTrackSource(slot, staticUrl);
             loadedConfig.audio[slot].hasAsset = true;
             loadedConfig.audio[slot].fileName = staticFile;

@@ -1,4 +1,5 @@
 import { AudioSlotConfig, AudioSlotKey } from '../types/game';
+import { resolveAssetUrl } from '../utils/assetPath';
 
 const ALL_SLOTS: AudioSlotKey[] = [
   'flying',
@@ -67,9 +68,13 @@ export class GameAudioController {
       delete this.elements[slot];
     }
     if (url) {
-      this.urls[slot] = url;
-      const audio = new Audio(url);
+      const resolvedUrl = resolveAssetUrl(url, 'assets/');
+      this.urls[slot] = resolvedUrl;
+      const audio = new Audio(resolvedUrl);
       audio.preload = 'auto';
+      audio.addEventListener('error', () => {
+        console.warn(`[Audio] Failed to load track for "${slot}" from: ${resolvedUrl}`);
+      });
       audio.addEventListener('timeupdate', () => {
         if (this.previewSlot === slot) {
           this.emit();
@@ -156,11 +161,13 @@ export class GameAudioController {
   resumeActive() {
     if (!this.activeSlot) return;
     const el = this.elements[this.activeSlot];
-    if (el) {
+    if (el && !el.error) {
       this.applySettingsToElement(this.activeSlot);
-      el.play().catch(() => {
-        this.autoplayBlocked = true;
-        this.pendingBlockedSlot = this.activeSlot;
+      el.play().catch((err) => {
+        const isAutoplayBlocked =
+          !el.error && err instanceof DOMException && err.name === 'NotAllowedError';
+        this.autoplayBlocked = isAutoplayBlocked;
+        this.pendingBlockedSlot = isAutoplayBlocked ? this.activeSlot : null;
         this.emit();
       });
     }
@@ -191,7 +198,7 @@ export class GameAudioController {
 
     const target = this.elements[slot];
     const cfg = this.configs[slot];
-    if (!target || !cfg?.hasAsset) {
+    if (!target || target.error || !cfg?.hasAsset) {
       this.activeSlot = null;
       this.autoplayBlocked = false;
       this.pendingBlockedSlot = null;
@@ -214,9 +221,14 @@ export class GameAudioController {
       this.autoplayBlocked = false;
       this.pendingBlockedSlot = null;
       this.emit();
-    } catch {
-      this.autoplayBlocked = true;
-      this.pendingBlockedSlot = slot;
+    } catch (err) {
+      const isAutoplayBlocked =
+        !target.error && err instanceof DOMException && err.name === 'NotAllowedError';
+      if (!isAutoplayBlocked) {
+        this.activeSlot = null;
+      }
+      this.autoplayBlocked = isAutoplayBlocked;
+      this.pendingBlockedSlot = isAutoplayBlocked ? slot : null;
       this.emit();
     }
   }
@@ -228,8 +240,14 @@ export class GameAudioController {
    */
   async playCollisionThenGameOver(onTransitionToGameOverReady?: () => void): Promise<void> {
     this.clearCollisionTimer();
-    const hasCollision = this.configs.collision.hasAsset && Boolean(this.elements.collision);
-    const hasGameOver = this.configs.gameOver.hasAsset && Boolean(this.elements.gameOver);
+    const hasCollision =
+      this.configs.collision.hasAsset &&
+      Boolean(this.elements.collision) &&
+      !this.elements.collision?.error;
+    const hasGameOver =
+      this.configs.gameOver.hasAsset &&
+      Boolean(this.elements.gameOver) &&
+      !this.elements.gameOver?.error;
 
     if (!hasCollision) {
       if (hasGameOver) {
@@ -243,7 +261,12 @@ export class GameAudioController {
 
     await this.playGameSlot('collision', true);
     const colEl = this.elements.collision;
-    if (!colEl) return;
+    if (!colEl || this.activeSlot !== 'collision') {
+      if (hasGameOver) {
+        await this.playGameSlot('gameOver', true);
+      }
+      return;
+    }
 
     if (hasGameOver) {
       const duration = Number.isFinite(colEl.duration) ? colEl.duration : 0;
