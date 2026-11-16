@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Download } from 'lucide-react';
 import { GameAudioController } from './audio/audioManager';
 import { GameArena } from './components/GameArena';
+import { IndexedDbExportModal } from './components/IndexedDbExportModal';
 import { loadAllAssetBlobs, loadGameConfig, saveGameConfig } from './storage/indexedDb';
 import {
   AudioSlotKey,
@@ -10,6 +12,23 @@ import {
   ImageSlotKey,
   LoadedMediaAssets,
 } from './types/game';
+
+interface StaticAssetManifest {
+  images?: Partial<Record<ImageSlotKey, string | null>>;
+  audio?: Partial<Record<AudioSlotKey, string | null>>;
+  config?: Partial<CustomGameConfig> | null;
+}
+
+async function fetchStaticManifest(): Promise<StaticAssetManifest | null> {
+  try {
+    const base = import.meta.env.BASE_URL || './';
+    const res = await fetch(`${base}assets/manifest.json`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return (await res.json()) as StaticAssetManifest;
+  } catch {
+    return null;
+  }
+}
 
 function loadImageElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -23,6 +42,10 @@ function loadImageElement(url: string): Promise<HTMLImageElement> {
 export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const [initWarning, setInitWarning] = useState<string | null>(null);
+  const [showExporter, setShowExporter] = useState(() =>
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('export') === '1'
+  );
   const [config, setConfig] = useState<CustomGameConfig>(() => createDefaultGameConfig());
   const [media, setMedia] = useState<LoadedMediaAssets>({
     imageUrls: {},
@@ -62,18 +85,57 @@ export default function App() {
     });
   }, [audioController]);
 
-  // Hydrate all saved images, audio tracks, and settings from IndexedDB
+  // Hydrate static defaults from public/assets/manifest.json and any local IndexedDB overrides
   useEffect(() => {
     let cancelled = false;
 
     const hydrate = async () => {
       try {
-        const [loadedConfig, blobs] = await Promise.all([
+        const [loadedConfig, blobs, manifest] = await Promise.all([
           loadGameConfig(),
           loadAllAssetBlobs(),
+          fetchStaticManifest(),
         ]);
 
         if (cancelled) return;
+
+        const base = import.meta.env.BASE_URL || './';
+        const staticCfg = manifest?.config;
+
+        // Apply static config defaults for transforms/settings if provided
+        if (staticCfg) {
+          if (staticCfg.settings) {
+            loadedConfig.settings = {
+              ...loadedConfig.settings,
+              ...staticCfg.settings,
+              muted: loadedConfig.settings.muted,
+            };
+          }
+          if (staticCfg.images) {
+            (['character', 'upperPillar', 'lowerPillar', 'background'] as ImageSlotKey[]).forEach(
+              (slot) => {
+                if (staticCfg.images?.[slot] && !blobs[`image:${slot}`]) {
+                  loadedConfig.images[slot] = {
+                    ...loadedConfig.images[slot],
+                    ...staticCfg.images[slot],
+                  };
+                }
+              }
+            );
+          }
+          if (staticCfg.audio) {
+            (['flying', 'collision', 'victory', 'gameOver', 'startScreen'] as AudioSlotKey[]).forEach(
+              (slot) => {
+                if (staticCfg.audio?.[slot] && !blobs[`audio:${slot}`]) {
+                  loadedConfig.audio[slot] = {
+                    ...loadedConfig.audio[slot],
+                    ...staticCfg.audio[slot],
+                  };
+                }
+              }
+            );
+          }
+        }
 
         const nextImageUrls: Partial<Record<ImageSlotKey, string>> = {};
         const nextImageElements: Partial<Record<ImageSlotKey, HTMLImageElement>> = {};
@@ -87,6 +149,7 @@ export default function App() {
         ];
         for (const slot of imageSlots) {
           const blob = blobs[`image:${slot}`];
+          const staticFile = manifest?.images?.[slot];
           if (blob) {
             const url = URL.createObjectURL(blob);
             nextImageUrls[slot] = url;
@@ -97,6 +160,20 @@ export default function App() {
               }
             } catch {
               // Keep fallback if blob fails to decode
+            }
+          } else if (staticFile) {
+            const staticUrl = `${base}assets/${staticFile.replace(/^\/+/, '')}`;
+            try {
+              const el = await loadImageElement(staticUrl);
+              if (!cancelled) {
+                nextImageElements[slot] = el;
+                loadedConfig.images[slot].hasAsset = true;
+                loadedConfig.images[slot].fileName = staticFile;
+                loadedConfig.images[slot].naturalWidth = el.naturalWidth;
+                loadedConfig.images[slot].naturalHeight = el.naturalHeight;
+              }
+            } catch {
+              loadedConfig.images[slot].hasAsset = false;
             }
           } else if (loadedConfig.images[slot].hasAsset) {
             loadedConfig.images[slot].hasAsset = false;
@@ -112,10 +189,16 @@ export default function App() {
         ];
         for (const slot of audioSlots) {
           const blob = blobs[`audio:${slot}`];
+          const staticFile = manifest?.audio?.[slot];
           if (blob) {
             const url = URL.createObjectURL(blob);
             nextAudioUrls[slot] = url;
             audioController.setTrackSource(slot, url);
+          } else if (staticFile) {
+            const staticUrl = `${base}assets/${staticFile.replace(/^\/+/, '')}`;
+            audioController.setTrackSource(slot, staticUrl);
+            loadedConfig.audio[slot].hasAsset = true;
+            loadedConfig.audio[slot].fileName = staticFile;
           } else {
             audioController.setTrackSource(slot, undefined);
             if (loadedConfig.audio[slot].hasAsset) {
@@ -232,9 +315,17 @@ export default function App() {
           <span className="font-display text-lg font-bold tracking-tight text-slate-100 whitespace-nowrap shrink-0">
             Skyline Studio Arcade
           </span>
-          <span className="text-xs font-medium text-slate-400 whitespace-nowrap shrink-0">
-            45-Second Survival Challenge
-          </span>
+          <button
+            type="button"
+            onClick={() => {
+              audioController.stopAll();
+              setShowExporter(true);
+            }}
+            className="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-1.5 text-xs font-semibold text-slate-100 transition-colors hover:bg-slate-700 whitespace-nowrap shrink-0"
+          >
+            <Download className="h-3.5 w-3.5 text-amber-400" />
+            Export Assets
+          </button>
         </div>
       </header>
 
@@ -265,6 +356,10 @@ export default function App() {
           onRecordRunOutcome={handleRecordRunOutcome}
         />
       </main>
+
+      {showExporter && (
+        <IndexedDbExportModal onClose={() => setShowExporter(false)} />
+      )}
     </div>
   );
 }

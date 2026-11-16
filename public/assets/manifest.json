@@ -1,0 +1,16 @@
+{
+  "images": {
+    "character": null,
+    "upperPillar": null,
+    "lowerPillar": null,
+    "background": null
+  },
+  "audio": {
+    "flying": null,
+    "collision": null,
+    "victory": null,
+    "gameOver": null,
+    "startScreen": null
+  },
+  "config": null
+}
