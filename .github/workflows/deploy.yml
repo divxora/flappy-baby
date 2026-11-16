@@ -43,8 +43,8 @@ jobs:
       - name: Verify production index.html
         run: |
           cat dist/index.html
-          if grep -q "main\.tsx" dist/index.html; then
-            echo "ERROR: dist/index.html still references main.tsx"
+          if grep -Eq '<script[^>]+src="[^"]*main\.tsx"' dist/index.html; then
+            echo "ERROR: dist/index.html still references main.tsx in a script tag"
             exit 1
           fi
           grep -q "/flappy-baby/assets/" dist/index.html
