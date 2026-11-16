@@ -58,7 +58,10 @@
           if (!root || root.children.length > 0) return;
           var detail = bootErrors.length
             ? bootErrors.join(' | ')
-            : 'The application script did not initialize. If deploying on GitHub Pages, make sure Pages is set to deploy from GitHub Actions (building dist/) rather than raw source files.';
+            : 'The application script did not initialize.';
+          if (detail.indexOf('main.tsx') !== -1) {
+            detail += ' — GitHub Pages is currently serving raw source files instead of the built dist/ folder. Set Settings -> Pages -> Source to "GitHub Actions" so .github/workflows/deploy.yml builds and publishes dist/.';
+          }
           root.innerHTML =
             '<div class="boot-fallback">' +
             '<h2 style="margin-top:0;color:#f87171;">Application Failed to Start</h2>' +
@@ -69,6 +72,6 @@
         }, 4000);
       })();
     </script>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>

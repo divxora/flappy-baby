@@ -37,8 +37,8 @@ jobs:
 
       - name: Verify production index.html
         run: |
-          if grep -q "/src/main.tsx" dist/index.html; then
-            echo "ERROR: dist/index.html still references /src/main.tsx"
+          if grep -q "main\.tsx" dist/index.html; then
+            echo "ERROR: dist/index.html still references main.tsx"
             exit 1
           fi
           grep -q "/flappy-baby/assets/" dist/index.html
