@@ -299,7 +299,7 @@ export default function App() {
 
   if (!hydrated) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-[#0B1120] px-4 text-slate-300">
+      <div className="flex h-[100dvh] w-full items-center justify-center bg-[#0B1120] px-4 text-slate-300">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
           <p className="mt-3 text-sm font-medium">Loading game assets...</p>
@@ -309,10 +309,10 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#0B1120] text-slate-100 pb-[env(safe-area-inset-bottom)]">
-      <header className="border-b border-slate-800/90 bg-[#0D1526] pt-[env(safe-area-inset-top)]">
-        <div className="mx-auto flex max-w-[1040px] items-center justify-between gap-3 px-3 py-2.5 sm:gap-8 sm:px-6 sm:py-3.5">
-          <span className="font-display text-base font-bold tracking-tight text-slate-100 whitespace-nowrap truncate sm:text-lg">
+    <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0B1120] text-slate-100">
+      <header className="hidden border-b border-slate-800/90 bg-[#0D1526] md:block">
+        <div className="mx-auto flex max-w-[1040px] items-center justify-between gap-8 px-6 py-3">
+          <span className="font-display text-lg font-bold tracking-tight text-slate-100 whitespace-nowrap">
             Skyline Studio Arcade
           </span>
           <button
@@ -321,18 +321,18 @@ export default function App() {
               audioController.stopAll();
               setShowExporter(true);
             }}
-            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 transition-colors hover:bg-slate-700 active:bg-slate-600 whitespace-nowrap shrink-0 sm:gap-2 sm:px-3.5"
+            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-1.5 text-xs font-semibold text-slate-100 transition-colors hover:bg-slate-700 active:bg-slate-600 whitespace-nowrap shrink-0"
           >
             <Download className="h-3.5 w-3.5 text-amber-400" />
-            <span className="sm:inline">Export Assets</span>
+            <span>Export Assets</span>
           </button>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col">
+      <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {initWarning && (
-          <div className="mx-auto mt-3 w-full max-w-[1040px] px-3 sm:mt-4 sm:px-6">
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-200 sm:px-4 sm:py-2.5">
+          <div className="pointer-events-auto absolute inset-x-0 top-14 z-30 mx-auto w-full max-w-[1040px] px-3 md:static md:mt-3 md:px-6">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 py-2 text-xs text-amber-200 backdrop-blur-md">
               <span>{initWarning}</span>
               <button
                 type="button"
@@ -353,6 +353,10 @@ export default function App() {
           onToggleMute={() =>
             handleChangeSettings({ muted: !config.settings.muted })
           }
+          onOpenExporter={() => {
+            audioController.stopAll();
+            setShowExporter(true);
+          }}
           onRecordRunOutcome={handleRecordRunOutcome}
         />
       </main>

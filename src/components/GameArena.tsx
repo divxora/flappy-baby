@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Download,
   Pause,
   Play,
   RotateCcw,
@@ -35,25 +36,68 @@ interface GameArenaProps {
   autoplayBlocked: boolean;
   activeAudioSlot: AudioSlotKey | null;
   onToggleMute: () => void;
+  onOpenExporter: () => void;
   onRecordRunOutcome: (score: number, won: boolean) => void;
 }
 
-const CANVAS_H = 540;
-const GROUND_H = 48;
-const PLAYABLE_H = CANVAS_H - GROUND_H;
-const DESKTOP_W = 900;
-const DESKTOP_BIRD_X = 195;
-const PORTRAIT_W = 420;
-const PORTRAIT_BIRD_X = 110;
+interface WorldMetrics {
+  cssW: number;
+  cssH: number;
+  dpr: number;
+  worldW: number;
+  worldH: number;
+  playableH: number;
+  groundH: number;
+  scale: number;
+  birdX: number;
+  isPortrait: boolean;
+}
 
-function getViewportCanvasDims(): { width: number; birdX: number; isPortrait: boolean } {
-  if (typeof window === 'undefined') {
-    return { width: DESKTOP_W, birdX: DESKTOP_BIRD_X, isPortrait: false };
+function computeWorldMetrics(cssW: number, cssH: number): WorldMetrics {
+  const safeW = Math.max(240, cssW);
+  const safeH = Math.max(240, cssH);
+  const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+  const aspect = safeW / safeH;
+  const isPortrait = aspect < 1.05;
+
+  if (isPortrait) {
+    const worldW = 360;
+    const scale = safeW / worldW;
+    const worldH = safeH / scale;
+    const groundH = 52;
+    const playableH = Math.max(320, worldH - groundH);
+    return {
+      cssW: safeW,
+      cssH: safeH,
+      dpr,
+      worldW,
+      worldH,
+      playableH,
+      groundH,
+      scale,
+      birdX: 92,
+      isPortrait: true,
+    };
   }
-  const isPortrait = window.innerWidth < 640 && window.innerHeight > window.innerWidth;
-  return isPortrait
-    ? { width: PORTRAIT_W, birdX: PORTRAIT_BIRD_X, isPortrait: true }
-    : { width: DESKTOP_W, birdX: DESKTOP_BIRD_X, isPortrait: false };
+
+  const worldH = 540;
+  const scale = safeH / worldH;
+  const worldW = safeW / scale;
+  const groundH = 48;
+  const playableH = worldH - groundH;
+  const birdX = Math.max(120, Math.min(230, Math.round(worldW * 0.22)));
+  return {
+    cssW: safeW,
+    cssH: safeH,
+    dpr,
+    worldW,
+    worldH,
+    playableH,
+    groundH,
+    scale,
+    birdX,
+    isPortrait: false,
+  };
 }
 
 export const GameArena: React.FC<GameArenaProps> = ({
@@ -63,13 +107,19 @@ export const GameArena: React.FC<GameArenaProps> = ({
   autoplayBlocked,
   activeAudioSlot,
   onToggleMute,
+  onOpenExporter,
   onRecordRunOutcome,
 }) => {
+  const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const lastTouchTimeRef = useRef(0);
 
-  const [viewportDims, setViewportDims] = useState(getViewportCanvasDims);
-  const dimsRef = useRef(viewportDims);
-  dimsRef.current = viewportDims;
+  const metricsRef = useRef<WorldMetrics>(
+    computeWorldMetrics(
+      typeof window !== 'undefined' ? window.innerWidth : 900,
+      typeof window !== 'undefined' ? window.innerHeight : 540
+    )
+  );
 
   const [gameState, setGameState] = useState<GameState>('START_SCREEN');
   const [score, setScore] = useState(0);
@@ -90,7 +140,11 @@ export const GameArena: React.FC<GameArenaProps> = ({
     outcomeRecorded: boolean;
   }>({
     state: 'START_SCREEN',
-    bird: { x: viewportDims.birdX, y: PLAYABLE_H / 2, vy: 0 },
+    bird: {
+      x: metricsRef.current.birdX,
+      y: metricsRef.current.playableH / 2,
+      vy: 0,
+    },
     pillars: [],
     particles: [],
     scrollDistance: 0,
@@ -101,30 +155,55 @@ export const GameArena: React.FC<GameArenaProps> = ({
     outcomeRecorded: false,
   });
 
-  useEffect(() => {
-    const handleResize = () => {
-      const next = getViewportCanvasDims();
-      setViewportDims((prev) => {
-        if (prev.width === next.width && prev.isPortrait === next.isPortrait) {
-          return prev;
-        }
-        dimsRef.current = next;
-        simRef.current.bird.x = next.birdX;
-        return next;
-      });
-    };
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleResize);
-    };
-  }, []);
-
   const configRef = useRef(config);
   const mediaRef = useRef(media);
   configRef.current = config;
   mediaRef.current = media;
+
+  // Sync canvas physical backing resolution and logical world metrics on resize/orientation change
+  useEffect(() => {
+    const stageEl = stageRef.current;
+    const canvasEl = canvasRef.current;
+    if (!stageEl || !canvasEl) return;
+
+    const syncCanvasSize = () => {
+      const rect = stageEl.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const next = computeWorldMetrics(rect.width, rect.height);
+      const prev = metricsRef.current;
+      metricsRef.current = next;
+
+      const targetPixelW = Math.max(1, Math.round(next.cssW * next.dpr));
+      const targetPixelH = Math.max(1, Math.round(next.cssH * next.dpr));
+      if (canvasEl.width !== targetPixelW || canvasEl.height !== targetPixelH) {
+        canvasEl.width = targetPixelW;
+        canvasEl.height = targetPixelH;
+      }
+
+      simRef.current.bird.x = next.birdX;
+      if (prev.playableH > 0 && Math.abs(prev.playableH - next.playableH) > 2) {
+        const ratio = simRef.current.bird.y / prev.playableH;
+        simRef.current.bird.y = Math.max(
+          24,
+          Math.min(next.playableH - 24, ratio * next.playableH)
+        );
+      }
+    };
+
+    syncCanvasSize();
+
+    const ro = new ResizeObserver(syncCanvasSize);
+    ro.observe(stageEl);
+    window.addEventListener('resize', syncCanvasSize);
+    window.addEventListener('orientationchange', syncCanvasSize);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', syncCanvasSize);
+      window.removeEventListener('orientationchange', syncCanvasSize);
+    };
+  }, []);
 
   // Start Screen music activation when entering START_SCREEN
   useEffect(() => {
@@ -179,10 +258,10 @@ export const GameArena: React.FC<GameArenaProps> = ({
 
   const spawnVictoryConfetti = () => {
     const colors = ['#10B981', '#F59E0B', '#38BDF8', '#F43F5E', '#FEF08A'];
-    const canvasW = dimsRef.current.width;
+    const { worldW } = metricsRef.current;
     for (let i = 0; i < 95; i++) {
       simRef.current.particles.push({
-        x: Math.random() * canvasW,
+        x: Math.random() * worldW,
         y: -20 - Math.random() * 140,
         vx: (Math.random() - 0.5) * 190,
         vy: 60 + Math.random() * 140,
@@ -199,10 +278,11 @@ export const GameArena: React.FC<GameArenaProps> = ({
 
   const resetAndStartGame = useCallback(() => {
     const cfg = configRef.current;
-    const { width: canvasW, birdX } = dimsRef.current;
+    const { worldW, playableH, birdX } = metricsRef.current;
+
     simRef.current = {
       state: 'PLAYING',
-      bird: { x: birdX, y: PLAYABLE_H * 0.46, vy: -cfg.settings.flapStrength * 0.78 },
+      bird: { x: birdX, y: playableH * 0.46, vy: -cfg.settings.flapStrength * 0.78 },
       pillars: [],
       particles: [],
       scrollDistance: 0,
@@ -213,13 +293,14 @@ export const GameArena: React.FC<GameArenaProps> = ({
       outcomeRecorded: false,
     };
 
-    // Spawn first pillar comfortably ahead so player can get rhythm
-    const margin = Math.max(75, cfg.settings.pillarGap * 0.65);
-    const firstGapY =
-      margin + Math.random() * Math.max(40, PLAYABLE_H - margin * 2);
+    const topMargin = Math.max(96, cfg.settings.pillarGap * 0.65);
+    const bottomMargin = Math.max(76, cfg.settings.pillarGap * 0.65);
+    const span = Math.max(40, playableH - topMargin - bottomMargin);
+    const firstGapY = topMargin + Math.random() * span;
+
     simRef.current.pillars.push({
       id: simRef.current.nextPillarId++,
-      x: canvasW + 90,
+      x: worldW + 90,
       gapY: firstGapY,
       gapHeight: cfg.settings.pillarGap,
       scored: false,
@@ -230,7 +311,6 @@ export const GameArena: React.FC<GameArenaProps> = ({
     setCollisionFlash(false);
     setGameState('PLAYING');
 
-    // Start flying music strictly when START / PLAY AGAIN is pressed
     void audioController.playGameSlot('flying', true);
   }, [audioController]);
 
@@ -253,6 +333,34 @@ export const GameArena: React.FC<GameArenaProps> = ({
       audioController.resumeActive();
     }
   }, [audioController]);
+
+  // Direct non-passive touchstart & touchend listeners for 0ms latency without passive warnings
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      lastTouchTimeRef.current = performance.now();
+      if (simRef.current.state === 'PLAYING') {
+        e.preventDefault();
+        performFlap();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      lastTouchTimeRef.current = performance.now();
+      if (simRef.current.state === 'PLAYING') {
+        e.preventDefault();
+      }
+    };
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [performFlap]);
 
   // Keyboard controls: Space, ArrowUp, W to flap; P / Escape to pause
   useEffect(() => {
@@ -297,11 +405,11 @@ export const GameArena: React.FC<GameArenaProps> = ({
       const sim = simRef.current;
       const cfg = configRef.current;
       const assets = mediaRef.current;
-      const canvasW = dimsRef.current.width;
+      const m = metricsRef.current;
 
       if (sim.state === 'START_SCREEN') {
         sim.scrollDistance += cfg.settings.scrollSpeed * 0.35 * dt;
-        sim.bird.y = PLAYABLE_H * 0.48 + Math.sin(now * 0.0032) * 14;
+        sim.bird.y = m.playableH * 0.48 + Math.sin(now * 0.0032) * 14;
         sim.bird.vy = Math.cos(now * 0.0032) * 120;
       } else if (sim.state === 'PLAYING') {
         // 1. Update countdown timer first (mutually exclusive check)
@@ -337,14 +445,15 @@ export const GameArena: React.FC<GameArenaProps> = ({
           // Spawn new pillars cleanly at configured spacing
           const spacing = Math.max(190, cfg.settings.pillarSpacing);
           const lastPillar = sim.pillars[sim.pillars.length - 1];
-          if (!lastPillar || lastPillar.x <= canvasW + 40 - spacing) {
-            const margin = Math.max(72, cfg.settings.pillarGap * 0.62);
-            const minY = margin;
-            const maxY = Math.max(minY + 30, PLAYABLE_H - margin);
+          if (!lastPillar || lastPillar.x <= m.worldW + 40 - spacing) {
+            const topMargin = Math.max(96, cfg.settings.pillarGap * 0.62);
+            const bottomMargin = Math.max(72, cfg.settings.pillarGap * 0.62);
+            const minY = topMargin;
+            const maxY = Math.max(minY + 30, m.playableH - bottomMargin);
             const gapY = minY + Math.random() * (maxY - minY);
             sim.pillars.push({
               id: sim.nextPillarId++,
-              x: lastPillar ? Math.max(canvasW + 60, lastPillar.x + spacing) : canvasW + 80,
+              x: lastPillar ? Math.max(m.worldW + 60, lastPillar.x + spacing) : m.worldW + 80,
               gapY,
               gapHeight: cfg.settings.pillarGap,
               scored: false,
@@ -370,7 +479,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
           }
 
           // 4. Collision Check (only while still PLAYING and timeRemaining > 0)
-          if (checkPillarCollision(sim.bird, sim.pillars, PLAYABLE_H, cfg)) {
+          if (checkPillarCollision(sim.bird, sim.pillars, m.playableH, cfg)) {
             sim.state = 'COLLIDING';
             sim.collidingElapsed = 0;
             sim.bird.vy = Math.min(sim.bird.vy, -140);
@@ -385,7 +494,6 @@ export const GameArena: React.FC<GameArenaProps> = ({
               onRecordRunOutcome(sim.score, false);
             }
 
-            // Immediately stop flying music & play collision -> gameOver sequence
             void audioController.playCollisionThenGameOver();
           }
 
@@ -398,24 +506,23 @@ export const GameArena: React.FC<GameArenaProps> = ({
         sim.collidingElapsed += dt;
         sim.bird.vy += cfg.settings.gravity * 1.15 * dt;
         sim.bird.y = Math.min(
-          PLAYABLE_H - Math.max(12, cfg.images.character.height * 0.35),
+          m.playableH - Math.max(12, cfg.images.character.height * 0.35),
           sim.bird.y + sim.bird.vy * dt
         );
 
         const landed =
-          sim.bird.y >= PLAYABLE_H - Math.max(12, cfg.images.character.height * 0.35) - 2;
+          sim.bird.y >= m.playableH - Math.max(12, cfg.images.character.height * 0.35) - 2;
         if (sim.collidingElapsed >= 0.65 || (landed && sim.collidingElapsed >= 0.35)) {
           sim.state = 'GAME_OVER';
           setGameState('GAME_OVER');
         }
       } else if (sim.state === 'WIN') {
-        // Gentle celebratory hover & continuous confetti drift
-        sim.bird.y = PLAYABLE_H * 0.45 + Math.sin(now * 0.005) * 10;
+        sim.bird.y = m.playableH * 0.45 + Math.sin(now * 0.005) * 10;
         sim.bird.vy = 0;
         if (Math.random() < 0.35) {
           const colors = ['#10B981', '#F59E0B', '#38BDF8', '#FEF08A'];
           sim.particles.push({
-            x: Math.random() * canvasW,
+            x: Math.random() * m.worldW,
             y: -10,
             vx: (Math.random() - 0.5) * 110,
             vy: 80 + Math.random() * 100,
@@ -430,13 +537,16 @@ export const GameArena: React.FC<GameArenaProps> = ({
         }
       }
 
-      // Render Frame
-      ctx.clearRect(0, 0, canvasW, CANVAS_H);
+      // Render Frame scaled uniformly to fill 100% of container with crisp Retina DPR
+      const totalScale = m.dpr * m.scale;
+      ctx.setTransform(totalScale, 0, 0, totalScale, 0, 0);
+      ctx.clearRect(0, 0, m.worldW, m.worldH);
+
       renderBackground(
         ctx,
-        canvasW,
-        CANVAS_H,
-        GROUND_H,
+        m.worldW,
+        m.worldH,
+        m.groundH,
         sim.scrollDistance,
         cfg,
         assets.imageElements.background
@@ -446,7 +556,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
         renderPillarPair(
           ctx,
           p,
-          PLAYABLE_H,
+          m.playableH,
           cfg,
           assets.imageElements.upperPillar,
           assets.imageElements.lowerPillar,
@@ -454,7 +564,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
         );
       }
 
-      renderGround(ctx, canvasW, CANVAS_H, GROUND_H, sim.scrollDistance);
+      renderGround(ctx, m.worldW, m.worldH, m.groundH, sim.scrollDistance);
       renderCharacter(ctx, sim.bird, cfg, assets.imageElements.character, false);
       updateAndRenderParticles(ctx, sim.particles, dt);
 
@@ -478,23 +588,18 @@ export const GameArena: React.FC<GameArenaProps> = ({
     startScreen: 'Start Screen Song',
   };
 
-  const stageMaxWidthStyle = viewportDims.isPortrait
-    ? { maxWidth: 'min(100%, calc((100dvh - 175px) * (420 / 540)))' }
-    : { maxWidth: 'min(100%, calc((100dvh - 140px) * (900 / 540)))' };
-
   return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-1 flex-col justify-between px-3 py-2.5 sm:justify-start sm:px-6 sm:py-5">
-      {/* Compact Arcade HUD Bar */}
-      <div className="mb-2.5 flex items-center justify-between gap-2 rounded-xl border border-slate-800 bg-[#11192B] px-3 py-2 sm:mb-4 sm:gap-4 sm:rounded-2xl sm:px-5 sm:py-3">
-        {/* Left: 45s Survival Countdown */}
-        <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+    <div className="mx-auto flex h-full min-h-0 w-full flex-1 flex-col md:max-w-[1040px] md:px-6 md:py-4">
+      {/* Desktop Top HUD Bar (hidden on mobile where HUD floats sleekly over full-screen canvas) */}
+      <div className="mb-3 hidden items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-[#11192B] px-5 py-2.5 md:flex">
+        <div className="flex items-center gap-4">
           <div>
-            <div className="text-[10px] font-medium text-slate-400 sm:text-[11px]">
-              Timer
+            <div className="text-[11px] font-medium text-slate-400">
+              Survival Countdown
             </div>
-            <div className="flex items-baseline gap-1">
+            <div className="flex items-baseline gap-1.5">
               <span
-                className={`font-mono-tabular text-lg font-bold sm:text-2xl ${
+                className={`font-mono-tabular text-2xl font-bold ${
                   timeRemaining <= 10 && gameState === 'PLAYING'
                     ? 'text-emerald-400'
                     : 'text-amber-400'
@@ -502,18 +607,18 @@ export const GameArena: React.FC<GameArenaProps> = ({
               >
                 {timeRemaining.toFixed(1)}s
               </span>
-              <span className="hidden font-mono-tabular text-xs text-slate-500 sm:inline">
+              <span className="font-mono-tabular text-xs text-slate-500">
                 / {SURVIVAL_DURATION_SECONDS}s
               </span>
             </div>
           </div>
 
-          <div className="w-16 sm:w-36">
-            <div className="mb-1 flex justify-between text-[10px] text-slate-400 sm:text-[11px]">
-              <span className="hidden sm:inline">Progress</span>
+          <div className="w-36">
+            <div className="mb-1 flex justify-between text-[11px] text-slate-400">
+              <span>Progress</span>
               <span className="font-mono-tabular">{Math.round(progressPct)}%</span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-800 sm:h-2">
+            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
               <div
                 className="h-full rounded-full bg-amber-500 transition-[width] duration-75"
                 style={{ width: `${progressPct}%` }}
@@ -522,25 +627,23 @@ export const GameArena: React.FC<GameArenaProps> = ({
           </div>
         </div>
 
-        {/* Center: Score & Best */}
-        <div className="flex items-center gap-3 sm:gap-6">
+        <div className="flex items-center gap-6">
           <div className="text-center">
-            <div className="text-[10px] font-medium text-slate-400 sm:text-[11px]">Score</div>
-            <div className="font-mono-tabular text-lg font-bold text-slate-100 sm:text-2xl">
+            <div className="text-[11px] font-medium text-slate-400">Obstacles</div>
+            <div className="font-mono-tabular text-2xl font-bold text-slate-100">
               {score}
             </div>
           </div>
-          <div className="h-6 w-px bg-slate-800 sm:h-8" />
+          <div className="h-8 w-px bg-slate-800" />
           <div className="text-center">
-            <div className="text-[10px] font-medium text-slate-400 sm:text-[11px]">Best</div>
-            <div className="font-mono-tabular text-base font-semibold text-slate-300 sm:text-xl">
+            <div className="text-[11px] font-medium text-slate-400">Best</div>
+            <div className="font-mono-tabular text-xl font-semibold text-slate-300">
               {Math.max(config.bestScore, score)}
             </div>
           </div>
         </div>
 
-        {/* Right: Audio & Pause Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-2">
           {activeAudioSlot && (
             <span className="hidden lg:inline text-xs text-emerald-400 mr-2">
               {activeSlotLabel[activeAudioSlot]}
@@ -551,18 +654,17 @@ export const GameArena: React.FC<GameArenaProps> = ({
             <button
               type="button"
               onClick={togglePause}
-              aria-label={gameState === 'PAUSED' ? 'Resume game' : 'Pause game'}
-              className="inline-flex min-h-[42px] min-w-[42px] items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 active:bg-slate-600 sm:px-3"
+              className="inline-flex min-h-[42px] items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
             >
               {gameState === 'PAUSED' ? (
                 <>
-                  <Play className="h-4 w-4 text-emerald-400 sm:h-3.5 sm:w-3.5" />
-                  <span className="hidden sm:inline">Resume</span>
+                  <Play className="h-3.5 w-3.5 text-emerald-400" />
+                  Resume
                 </>
               ) : (
                 <>
-                  <Pause className="h-4 w-4 text-amber-400 sm:h-3.5 sm:w-3.5" />
-                  <span className="hidden sm:inline">Pause</span>
+                  <Pause className="h-3.5 w-3.5 text-amber-400" />
+                  Pause
                 </>
               )}
             </button>
@@ -572,7 +674,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
             type="button"
             onClick={onToggleMute}
             aria-label={config.settings.muted ? 'Unmute audio' : 'Mute audio'}
-            className="inline-flex min-h-[42px] min-w-[42px] items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 active:bg-slate-600"
+            className="inline-flex min-h-[42px] min-w-[42px] items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
           >
             {config.settings.muted ? (
               <VolumeX className="h-4 w-4 text-red-400" />
@@ -583,23 +685,107 @@ export const GameArena: React.FC<GameArenaProps> = ({
         </div>
       </div>
 
-      {/* Main Playable Canvas Stage */}
+      {/* Full-Screen Mobile / Responsive Desktop Canvas Stage */}
       <div
-        className="relative mx-auto w-full overflow-hidden rounded-2xl border border-slate-800 bg-[#070B14] shadow-2xl select-none touch-none"
-        style={stageMaxWidthStyle}
+        ref={stageRef}
+        className="relative flex-1 min-h-0 w-full h-full overflow-hidden bg-[#070B14] select-none touch-none md:rounded-2xl md:border md:border-slate-800 md:shadow-2xl"
       >
         <canvas
           ref={canvasRef}
-          width={viewportDims.width}
-          height={CANVAS_H}
-          onPointerDown={(e) => {
+          onMouseDown={(e) => {
+            if (performance.now() - lastTouchTimeRef.current < 500) return;
             if (simRef.current.state === 'PLAYING') {
               e.preventDefault();
               performFlap();
             }
           }}
-          className="block w-full h-auto cursor-pointer select-none touch-none"
+          className="block h-full w-full cursor-pointer select-none touch-none"
         />
+
+        {/* Slim Floating Mobile HUD Bar (overlays top sky cleanly with zero wasted black space) */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden">
+          <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-xl border border-slate-700/60 bg-[#0F172A]/80 px-2.5 py-1.5 backdrop-blur-md shadow-lg">
+            {/* Timer & slim progress bar */}
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`font-mono-tabular text-base font-bold ${
+                  timeRemaining <= 10 && gameState === 'PLAYING'
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                }`}
+              >
+                {timeRemaining.toFixed(1)}s
+              </span>
+              <div className="w-12 sm:w-20">
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-amber-500 transition-[width] duration-75"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Score & Best */}
+            <div className="flex items-center gap-2.5 text-center">
+              <div className="flex items-baseline gap-1">
+                <span className="text-[10px] font-medium text-slate-400">Score</span>
+                <span className="font-mono-tabular text-base font-bold text-slate-100">
+                  {score}
+                </span>
+              </div>
+              <div className="h-4 w-px bg-slate-700" />
+              <div className="flex items-baseline gap-1">
+                <span className="text-[10px] font-medium text-slate-400">Best</span>
+                <span className="font-mono-tabular text-sm font-semibold text-emerald-400">
+                  {Math.max(config.bestScore, score)}
+                </span>
+              </div>
+            </div>
+
+            {/* Touch-sized action buttons */}
+            <div className="flex items-center gap-1 shrink-0">
+              {(gameState === 'PLAYING' || gameState === 'PAUSED') && (
+                <button
+                  type="button"
+                  onClick={togglePause}
+                  aria-label={gameState === 'PAUSED' ? 'Resume game' : 'Pause game'}
+                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-700/80 bg-slate-800/90 text-slate-200 active:bg-slate-600"
+                >
+                  {gameState === 'PAUSED' ? (
+                    <Play className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <Pause className="h-4 w-4 text-amber-400" />
+                  )}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={onToggleMute}
+                aria-label={config.settings.muted ? 'Unmute audio' : 'Mute audio'}
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-700/80 bg-slate-800/90 text-slate-200 active:bg-slate-600"
+              >
+                {config.settings.muted ? (
+                  <VolumeX className="h-4 w-4 text-red-400" />
+                ) : (
+                  <Volume2 className="h-4 w-4 text-slate-200" />
+                )}
+              </button>
+
+              {gameState !== 'PLAYING' && (
+                <button
+                  type="button"
+                  onClick={onOpenExporter}
+                  aria-label="Export Assets"
+                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-700/80 bg-slate-800/90 text-amber-400 active:bg-slate-600"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Brief collision flash */}
         {collisionFlash && (
@@ -614,13 +800,13 @@ export const GameArena: React.FC<GameArenaProps> = ({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className="absolute inset-0 flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-[2px] sm:p-4"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-[2px]"
             >
-              <div className="w-full max-w-md max-h-full overflow-y-auto rounded-2xl border border-slate-700/80 bg-[#0F172A]/95 p-4 text-center shadow-2xl sm:p-6">
-                <h2 className="text-2xl font-extrabold tracking-tight text-slate-100 sm:text-3xl">
+              <div className="w-full max-w-md max-h-[82dvh] overflow-y-auto rounded-2xl border border-slate-700/80 bg-[#0F172A]/95 p-5 text-center shadow-2xl sm:p-6">
+                <h1 className="text-2xl font-extrabold tracking-tight text-slate-100 sm:text-3xl">
                   45-Second Flight
-                </h2>
-                <p className="mt-1.5 text-xs text-slate-300 sm:mt-2 sm:text-sm">
+                </h1>
+                <p className="mt-2 text-xs text-slate-300 sm:text-sm">
                   Tap anywhere or press Space to fly. Survive all 45 seconds without hitting a pillar to win.
                 </p>
 
@@ -628,18 +814,18 @@ export const GameArena: React.FC<GameArenaProps> = ({
                   <button
                     type="button"
                     onClick={() => void audioController.unlockBlockedAudio()}
-                    className="mt-3 inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20 sm:mt-4"
+                    className="mt-3 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs font-medium text-amber-300 hover:bg-amber-500/20 sm:mt-4"
                   >
-                    <Volume2 className="h-3.5 w-3.5" />
+                    <Volume2 className="h-4 w-4" />
                     Enable Start Screen Music
                   </button>
                 )}
 
-                <div className="mt-4 flex justify-center sm:mt-6">
+                <div className="mt-5 flex justify-center sm:mt-6">
                   <button
                     type="button"
                     onClick={resetAndStartGame}
-                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-8 py-2.5 text-base font-bold text-slate-950 transition-colors hover:bg-amber-400 active:bg-amber-300 sm:w-auto"
+                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-8 py-3 text-base font-bold text-slate-950 transition-colors hover:bg-amber-400 active:bg-amber-300 sm:w-auto"
                   >
                     <Play className="h-4 w-4 fill-current" />
                     START
@@ -658,18 +844,18 @@ export const GameArena: React.FC<GameArenaProps> = ({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="absolute inset-0 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-4"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
             >
-              <div className="w-full max-w-sm max-h-full overflow-y-auto rounded-2xl border border-slate-700 bg-[#0F172A] p-4 text-center shadow-2xl sm:p-6">
+              <div className="w-full max-w-sm max-h-[82dvh] overflow-y-auto rounded-2xl border border-slate-700 bg-[#0F172A] p-5 text-center shadow-2xl sm:p-6">
                 <h2 className="text-xl font-bold text-slate-100 sm:text-2xl">Game Paused</h2>
-                <p className="mt-1 font-mono-tabular text-xs text-slate-400 sm:mt-1.5 sm:text-sm">
+                <p className="mt-1.5 font-mono-tabular text-xs text-slate-400 sm:text-sm">
                   {timeRemaining.toFixed(1)}s remaining · Score {score}
                 </p>
-                <div className="mt-4 flex flex-col gap-2.5 sm:mt-6">
+                <div className="mt-5 flex flex-col gap-3 sm:mt-6">
                   <button
                     type="button"
                     onClick={togglePause}
-                    className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-400 active:bg-amber-300"
+                    className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-400 active:bg-amber-300"
                   >
                     <Play className="h-4 w-4 fill-current" />
                     Resume Flight
@@ -677,7 +863,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
                   <button
                     type="button"
                     onClick={resetAndStartGame}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-5 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700 active:bg-slate-600"
+                    className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-5 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700 active:bg-slate-600"
                   >
                     <RotateCcw className="h-4 w-4" />
                     Restart 45s Run
@@ -696,17 +882,17 @@ export const GameArena: React.FC<GameArenaProps> = ({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="absolute inset-0 flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-4"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
             >
-              <div className="w-full max-w-md max-h-full overflow-y-auto rounded-2xl border border-red-500/35 bg-[#0F172A]/95 p-4 text-center shadow-2xl sm:p-6">
+              <div className="w-full max-w-md max-h-[82dvh] overflow-y-auto rounded-2xl border border-red-500/35 bg-[#0F172A]/95 p-5 text-center shadow-2xl sm:p-6">
                 <div className="text-[11px] font-semibold tracking-wide text-red-400 sm:text-xs">
                   Collision Before 45 Seconds
                 </div>
-                <h2 className="mt-0.5 text-2xl font-extrabold text-slate-100 sm:mt-1 sm:text-3xl">
+                <h2 className="mt-1 text-2xl font-extrabold text-slate-100 sm:text-3xl">
                   Game Over
                 </h2>
 
-                <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3 sm:mt-5 sm:gap-3 sm:p-4">
+                <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3 sm:mt-5 sm:gap-3 sm:p-4">
                   <div>
                     <div className="text-[10px] text-slate-400 sm:text-[11px]">Survived</div>
                     <div className="font-mono-tabular mt-0.5 text-base font-bold text-slate-100 sm:text-lg">
@@ -727,11 +913,11 @@ export const GameArena: React.FC<GameArenaProps> = ({
                   </div>
                 </div>
 
-                <div className="mt-4 flex justify-center sm:mt-6">
+                <div className="mt-5 flex justify-center sm:mt-6">
                   <button
                     type="button"
                     onClick={resetAndStartGame}
-                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-7 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-amber-400 active:bg-amber-300 sm:w-auto"
+                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-7 py-3 text-sm font-bold text-slate-950 transition-colors hover:bg-amber-400 active:bg-amber-300 sm:w-auto"
                   >
                     <RotateCcw className="h-4 w-4" />
                     Play Again
@@ -750,9 +936,9 @@ export const GameArena: React.FC<GameArenaProps> = ({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="absolute inset-0 flex items-center justify-center bg-slate-950/65 p-3 backdrop-blur-[2px] sm:p-4"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-[2px]"
             >
-              <div className="w-full max-w-md max-h-full overflow-y-auto rounded-2xl border border-emerald-500/45 bg-[#0F172A]/95 p-4 text-center shadow-2xl sm:p-7">
+              <div className="w-full max-w-md max-h-[82dvh] overflow-y-auto rounded-2xl border border-emerald-500/45 bg-[#0F172A]/95 p-5 text-center shadow-2xl sm:p-7">
                 <motion.div
                   initial={{ scale: 0.6, rotate: -10 }}
                   animate={{ scale: 1, rotate: 0 }}
@@ -762,17 +948,17 @@ export const GameArena: React.FC<GameArenaProps> = ({
                   <Trophy className="h-6 w-6 sm:h-8 sm:w-8" />
                 </motion.div>
 
-                <div className="mt-2.5 text-[11px] font-semibold tracking-wide text-emerald-400 sm:mt-4 sm:text-xs">
+                <div className="mt-3 text-[11px] font-semibold tracking-wide text-emerald-400 sm:mt-4 sm:text-xs">
                   45-Second Survival Completed
                 </div>
-                <h2 className="mt-0.5 text-2xl font-extrabold text-slate-100 sm:mt-1 sm:text-3xl">
+                <h2 className="mt-1 text-2xl font-extrabold text-slate-100 sm:text-3xl">
                   You Win!
                 </h2>
-                <p className="mt-1 text-xs text-slate-300 sm:mt-1.5 sm:text-sm">
+                <p className="mt-1.5 text-xs text-slate-300 sm:text-sm">
                   Flawless flight through all 45 seconds without collision.
                 </p>
 
-                <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3 sm:mt-5 sm:gap-3 sm:p-4">
+                <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3 sm:mt-5 sm:gap-3 sm:p-4">
                   <div>
                     <div className="text-[10px] text-slate-400 sm:text-[11px]">Duration</div>
                     <div className="font-mono-tabular mt-0.5 text-base font-bold text-emerald-400 sm:text-lg">
@@ -793,11 +979,11 @@ export const GameArena: React.FC<GameArenaProps> = ({
                   </div>
                 </div>
 
-                <div className="mt-4 flex justify-center sm:mt-6">
+                <div className="mt-5 flex justify-center sm:mt-6">
                   <button
                     type="button"
                     onClick={resetAndStartGame}
-                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-7 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-400 active:bg-emerald-300 sm:w-auto"
+                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-7 py-3 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-400 active:bg-emerald-300 sm:w-auto"
                   >
                     <RotateCcw className="h-4 w-4" />
                     Play Again
@@ -809,31 +995,8 @@ export const GameArena: React.FC<GameArenaProps> = ({
         </AnimatePresence>
       </div>
 
-      {/* Dedicated Mobile Thumb-Tap Pad (keeps thumb clear of canvas during flight) */}
-      {viewportDims.isPortrait && (
-        <button
-          type="button"
-          onPointerDown={(e) => {
-            if (simRef.current.state === 'PLAYING') {
-              e.preventDefault();
-              performFlap();
-            } else if (simRef.current.state === 'START_SCREEN') {
-              e.preventDefault();
-              resetAndStartGame();
-            }
-          }}
-          className="mt-2.5 flex min-h-[54px] w-full items-center justify-center rounded-xl border border-slate-800 bg-[#11192B] text-xs font-semibold tracking-wide text-slate-300 select-none touch-none active:border-amber-500/60 active:bg-amber-500/15 active:text-amber-300 sm:hidden"
-        >
-          {gameState === 'PLAYING'
-            ? 'TAP HERE TO FLAP'
-            : gameState === 'START_SCREEN'
-              ? 'TAP TO START FLIGHT'
-              : 'Survive 45.0s to Win'}
-        </button>
-      )}
-
       {/* Subtle Desktop Controls Legend */}
-      <div className="mt-3 hidden sm:flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 px-1">
+      <div className="mt-2.5 hidden flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-400 md:flex">
         <span>
           Controls: Tap screen, Click mouse, or press Space / Up Arrow to fly · P to pause
         </span>
