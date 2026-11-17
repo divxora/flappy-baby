@@ -161,18 +161,18 @@ export const IndexedDbExportModal: React.FC<IndexedDbExportModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/85 p-2 backdrop-blur-sm sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Export IndexedDB Assets for public/assets"
     >
       <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-700 bg-[#0F172A] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
-          <div>
-            <h2 className="text-lg font-bold text-slate-100">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-800 px-4 py-3.5 sm:items-center sm:px-5 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-slate-100 sm:text-lg">
               Export Browser Assets to public/assets/
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="mt-0.5 text-xs text-slate-400">
               Download your locally saved IndexedDB files and manifest.json to place in public/assets/
             </p>
           </div>
@@ -180,30 +180,30 @@ export const IndexedDbExportModal: React.FC<IndexedDbExportModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close exporter"
-            className="rounded-lg border border-slate-700 bg-slate-800 p-1.5 text-slate-300 hover:bg-slate-700"
+            className="inline-flex min-h-[40px] min-w-[40px] shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto p-5 space-y-4">
+        <div className="max-h-[75dvh] overflow-y-auto p-4 space-y-3 sm:max-h-[70dvh] sm:p-5 sm:space-y-4">
           {loading ? (
             <p className="text-sm text-slate-400">Reading IndexedDB storage...</p>
           ) : items.length === 0 ? (
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-300 sm:p-5">
               No custom image or audio blobs were found in this browser origin&apos;s IndexedDB. Make sure you open <code className="text-amber-300">?export=1</code> on the exact URL where you originally uploaded your assets.
             </div>
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:p-4">
                 <div className="text-xs text-slate-300">
                   Found <strong className="text-amber-400">{items.length}</strong> uploaded files in IndexedDB.
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
                     onClick={() => triggerDownload(buildManifestBlob(), 'manifest.json')}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                    className="inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
                   >
                     <FileJson className="h-3.5 w-3.5 text-emerald-400" />
                     Download manifest.json
@@ -211,7 +211,7 @@ export const IndexedDbExportModal: React.FC<IndexedDbExportModalProps> = ({
                   <button
                     type="button"
                     onClick={() => void handleDownloadAll()}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-1.5 text-xs font-bold text-slate-950 hover:bg-amber-400"
+                    className="inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-4 py-1.5 text-xs font-bold text-slate-950 hover:bg-amber-400"
                   >
                     <Download className="h-3.5 w-3.5" />
                     Download All ({items.length + 1} files)
@@ -223,9 +223,9 @@ export const IndexedDbExportModal: React.FC<IndexedDbExportModalProps> = ({
                 {items.map((item) => (
                   <div
                     key={item.key}
-                    className="flex items-center justify-between gap-3 px-4 py-3"
+                    className="flex items-center justify-between gap-2.5 px-3.5 py-2.5 sm:gap-3 sm:px-4 sm:py-3"
                   >
-                    <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                       {item.slotType === 'image' ? (
                         <ImageIcon className="h-4 w-4 shrink-0 text-amber-400" />
                       ) : (
@@ -243,10 +243,10 @@ export const IndexedDbExportModal: React.FC<IndexedDbExportModalProps> = ({
                     <button
                       type="button"
                       onClick={() => triggerDownload(item.blob, item.targetFilename)}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 shrink-0"
+                      className="inline-flex min-h-[40px] items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 shrink-0"
                     >
                       <Download className="h-3.5 w-3.5" />
-                      Download
+                      <span className="hidden sm:inline">Download</span>
                     </button>
                   </div>
                 ))}
